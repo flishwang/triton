@@ -9,7 +9,7 @@ from typing import List
 import triton
 from triton.compiler.code_generator import kernel_suffix
 from triton.backends.nvidia.driver import ty_to_cpp
-
+from triton.backends.compiler import GPUTarget
 desc = """
 Triton ahead-of-time compiler:
 
@@ -44,6 +44,8 @@ if __name__ == "__main__":
                         help="Path to Python source containing desired kernel in its scope. File will be executed.")
     parser.add_argument("--kernel-name", "-n", type=str, default="", help="Name of the kernel to compile",
                         required=True)
+    parser.add_argument("--target-architecture", type=str, default="current", 
+                        help="Version of the GPU architecture compiling to")
     parser.add_argument("--num-warps", "-w", type=int, default=1, help="Number of warps to launch the kernel")
     parser.add_argument("--num-stages", "-ns", type=int, default=3,
                         help="Number of stages (meta-parameter of the kernel)")
@@ -92,7 +94,7 @@ if __name__ == "__main__":
 
     hints = {i: constexpr(s.split(":")[1]) for i, s in enumerate(signature) if ":" in s}
     hints = {k: v for k, v in hints.items() if v is not None}
-    constants = {i: constexpr(s) for i, s in enumerate(signature)}
+    constants = {i: constexpr(s.split(":")[0]) for i, s in enumerate(signature)}
     constants = {k: v for k, v in constants.items() if v is not None}
     signature = {i: s.split(":")[0] for i, s in enumerate(signature) if i not in constants}
     const_sig = 'x'.join([str(v) for v in constants.values()])
@@ -109,7 +111,8 @@ if __name__ == "__main__":
         constants.update({i: 1})
     src = triton.compiler.ASTSource(fn=kernel, constants=constants, signature=signature, attrs=attrs)
     opts = {"num_warps": args.num_warps, "num_stages": args.num_stages}
-    ccinfo = triton.compile(src, options=opts)
+    target=None if args.target_architectures == 'current' else GPUTarget("cuda", int(args.target_architectures), 32)
+    ccinfo = triton.compile(src, target=target, options=opts)
     arg_names = []
     arg_types = []
     for i in signature.keys():
@@ -124,7 +127,7 @@ if __name__ == "__main__":
     params = {
         "kernel_name": func_name,
         "triton_kernel_name": args.kernel_name,
-        "bin_size": len(hex_),
+        "bin_size": len(hex_)//2 + 1,
         "bin_data": ", ".join([f"0x{x}{y}" for x, y in zip(hex_[::2], hex_[1::2])]),
         "signature": ", ".join([f"{ty_to_cpp(ty)} {name}" for name, ty in zip(arg_names, arg_types)]),
         "full_signature": ", ".join([f"{ty_to_cpp(signature[i])} {kernel.arg_names[i]}" for i in signature.keys()]),
